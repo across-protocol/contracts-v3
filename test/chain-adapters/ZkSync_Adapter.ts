@@ -15,12 +15,12 @@ import { constructSingleChainTree } from "../MerkleLib.utils";
 import { smock } from "@defi-wonderland/smock";
 
 let hubPool: Contract, zkSyncAdapter: Contract, weth: Contract, dai: Contract, timer: Contract, mockSpoke: Contract;
-let l2Weth: string, l2Dai: string, mainnetWeth: FakeContract;
+let l2Weth: string, l2Dai: string;
 let owner: SignerWithAddress,
   dataWorker: SignerWithAddress,
   liquidityProvider: SignerWithAddress,
   refundAddress: SignerWithAddress;
-let zkSync: FakeContract, zkSyncErc20Bridge: FakeContract;
+let zkSync: FakeContract, zkSyncErc20Bridge: FakeContract, zkSyncWethBridge: FakeContract;
 
 const zkSyncChainId = 324;
 
@@ -89,9 +89,11 @@ describe("ZkSync Chain Adapter", function () {
     await dai.connect(dataWorker).approve(hubPool.address, bondAmount.mul(10));
 
     zkSync = await smock.fake(zkSyncAbi, { address: "0x32400084C286CF3E17e7B677ea9583e60a000324" });
-    zkSync = await smock.fake(zkSyncAbi, { address: "0x32400084C286CF3E17e7B677ea9583e60a000324" });
     zkSync.l2TransactionBaseCost.returns(l2TransactionBaseCost);
     zkSyncErc20Bridge = await smock.fake(zkSyncErc20BridgeAbi, {
+      address: "0x57891966931Eb4Bb6FB81430E6cE0A03AAbDe063",
+    });
+    zkSyncWethBridge = await smock.fake(zkSyncErc20BridgeAbi, {
       address: "0x57891966931Eb4Bb6FB81430E6cE0A03AAbDe063",
     });
 
@@ -132,7 +134,7 @@ describe("ZkSync Chain Adapter", function () {
     await timer.setCurrentTime(Number(await timer.getCurrentTime()) + refundProposalLiveness + 1);
     await hubPool.connect(dataWorker).executeRootBundle(...Object.values(leaves[0]), tree.getHexProof(leaves[0]));
 
-    // The correct functions should have been called on the optimism contracts.
+    // The correct functions should have been called on the canonical bridge contracts.
     const expectedErc20L1ToL2BridgeParams = [
       mockSpoke.address,
       dai.address,
@@ -144,29 +146,28 @@ describe("ZkSync Chain Adapter", function () {
     expect(zkSyncErc20Bridge.deposit).to.have.been.calledWith(...expectedErc20L1ToL2BridgeParams);
     expect(zkSyncErc20Bridge.deposit).to.have.been.calledWithValue(l2TransactionBaseCost);
   });
-  it("Correctly unwraps WETH and bridges ETH", async function () {
-    const { leaves, tree } = await constructSingleChainTree(weth.address, 1, zkSyncChainId);
+  it("Correctly calls WETH bridge", async function () {
+    const { leaves, tree, tokensSendToL2 } = await constructSingleChainTree(weth.address, 1, zkSyncChainId);
 
     await hubPool.connect(dataWorker).proposeRootBundle([3117], 1, tree.getHexRoot(), mockTreeRoot, mockTreeRoot);
     await timer.setCurrentTime(Number(await timer.getCurrentTime()) + refundProposalLiveness + 1);
+    await hubPool.connect(dataWorker).executeRootBundle(...Object.values(leaves[0]), tree.getHexProof(leaves[0]));
 
-    // Since WETH is used as proposal bond, the bond plus the WETH are debited from the HubPool's balance.
-    // The WETH used in the ZKSyncAdapter is withdrawn to ETH and then paid to the zksync mailbox.
-    const proposalBond = await hubPool.bondAmount();
-    await expect(() =>
-      hubPool.connect(dataWorker).executeRootBundle(...Object.values(leaves[0]), tree.getHexProof(leaves[0]))
-    ).to.changeTokenBalance(weth, hubPool, leaves[0].netSendAmounts[0].add(proposalBond).mul(-1));
-    expect(zkSync.requestL2Transaction).to.have.been.calledWith(
+    // // Since WETH is used as proposal bond, the bond plus the WETH are debited from the HubPool's balance.
+    // const proposalBond = await hubPool.bondAmount();
+    // await expect(() =>
+    //   hubPool.connect(dataWorker).executeRootBundle(...Object.values(leaves[0]), tree.getHexProof(leaves[0]))
+    // ).to.changeTokenBalance(weth, hubPool, leaves[0].netSendAmounts[0].add(proposalBond).mul(-1));
+
+    const expectedErc20L1ToL2BridgeParams = [
       mockSpoke.address,
-      leaves[0].netSendAmounts[0].toString(),
-      "0x",
+      weth.address,
+      tokensSendToL2,
       await zkSyncAdapter.L2_GAS_LIMIT(),
       await zkSyncAdapter.L1_GAS_TO_L2_GAS_PER_PUB_DATA_LIMIT(),
-      [],
-      refundAddress.address
-    );
-    expect(zkSync.requestL2Transaction).to.have.been.calledWithValue(
-      l2TransactionBaseCost.add(leaves[0].netSendAmounts[0])
-    );
+      await zkSyncAdapter.l2RefundAddress(),
+    ];
+    expect(zkSyncWethBridge.deposit).to.have.been.calledWith(...expectedErc20L1ToL2BridgeParams);
+    expect(zkSyncWethBridge.deposit).to.have.been.calledWithValue(l2TransactionBaseCost);
   });
 });

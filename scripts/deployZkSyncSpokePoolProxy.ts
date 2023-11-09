@@ -22,7 +22,21 @@ async function main() {
   const proxy = await hre.zkUpgrades.deployProxy(
     deployer.zkWallet,
     contract,
-    [1_000_000, "0x0e2817C49698cc0874204AeDf7c72Be2Bb7fCD5d", L1_ADDRESS_MAP[chainId].weth],
+    [
+      // Initial deposit ID
+      1_000_000,
+      // ZKErc20bridge
+      "0x0e2817C49698cc0874204AeDf7c72Be2Bb7fCD5d",
+      // ZKWETHBridge
+      // TODO: Update the following address once the WETH bridge is deployed and the address is known.
+      "0x0e2817C49698cc0874204AeDf7c72Be2Bb7fCD5d",
+      // Cross domain admin
+      zkWallet.address,
+      // HubPool
+      // TODO: Fill this in, we need the HubPool address for the testnet
+      zkWallet.address,
+      L1_ADDRESS_MAP[chainId].weth,
+    ],
     { initializer: "initialize" }
   );
 
