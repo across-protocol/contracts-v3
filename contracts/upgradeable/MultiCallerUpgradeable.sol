@@ -37,7 +37,14 @@ contract MultiCallerUpgradeable {
             (bool success, bytes memory result) = address(this).delegatecall(data[i]);
             //slither-disable-end low-level-calls
 
+            // Following if {..} block is from https://github.com/Uniswap/v4-periphery/blob/508277999222ee20207cd63efe50397760c2abe1/contracts/base/Multicall.sol
             if (!success) {
+                // handle custom errors
+                if (result.length == 4) {
+                    assembly {
+                        revert(add(result, 0x20), mload(result))
+                    }
+                }
                 // Next 5 lines from https://ethereum.stackexchange.com/a/83577
                 if (result.length < 68) revert();
                 //slither-disable-next-line assembly
